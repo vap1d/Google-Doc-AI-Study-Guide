@@ -14,7 +14,7 @@ After you've set it up, click save
 
 You will need to create your own Gemini API Key for this to work. To do so, go to https://aistudio.google.com, click the "Get API Key" button near the bottom left of your screen (it's a key icon above where your email is). Once you're there, click the grey "Create API Key" in the top right. Name your key whatever you want (leave it as a Default Gemeni Product), and create your API key. Copy and paste this into the YOUR_API_KEY_HERE constant.
 
-You will also need to obtain your Google Drive folder ID, but the proccess to obtain it is a lot more trivial. First, open up Google Drive in your browser and navigate to the folder where all of your information is. The script will run through ALL of the files in the folder, so create a separate folder if need be. Look at the URL of the folder and find the string of numbers and characters (drive.google.com/drive/folders/"LOOK HERE"). Anything else after the ? is junk, do not copy it. After that, copy the ID into the YOUR_ID_HERE constant. Save that as well.
+You will also need to obtain your Google Drive folder ID, but the proccess to obtain it is a lot more trivial. First, open up Google Drive in your browser and navigate to the folder where all of your information is. The script will run through ALL of the files in the folder, so create a separate folder if need be. Look at the URL of the folder and find the string of numbers and characters (drive.google.com/drive/folders/"LOOK HERE"). Anything else after the ? is junk, do not copy it. After that, copy the ID into the YOUR_FOLDER_ID_HERE constant. Save that as well.
 
 If you want to test the code at any time, click the "Run" button in the Toolbar
 

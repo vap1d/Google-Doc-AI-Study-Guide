@@ -1,0 +1,160 @@
+// CONFIGURATION
+const GEMINI_API_KEY = "YOUR_API_KEY_HERE";
+const FOLDER_ID = "YOUR_FOLDER_ID_HERE"; 
+
+function syncFolderToStudyGuide() {
+  const folder = DriveApp.getFolderById(FOLDER_ID);
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
+  
+  // Time window: Past 24 hours
+  const now = new Date();
+  const oneDayAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+  
+  const files = folder.getFiles();
+  let newFilesFound = false;
+  
+  while (files.hasNext()) {
+    const file = files.next();
+    const lastUpdated = file.getLastUpdated();
+    
+    if (lastUpdated > oneDayAgo) {
+      newFilesFound = true;
+      let rawText = "";
+      
+      const mimeType = file.getMimeType();
+      
+      if (mimeType === MimeType.GOOGLE_DOCS) {
+        const sourceDoc = DocumentApp.openById(file.getId());
+        rawText = sourceDoc.getBody().getText();
+      } else if (mimeType === MimeType.PLAIN_TEXT) {
+        rawText = file.getAs('text/plain').getDataAsString();
+      } else if (mimeType === MimeType.PDF) {
+        rawText = extractTextFromPDF(file);
+      }
+      
+      body.appendParagraph("=======================================")
+          .setHeading(DocumentApp.ParagraphHeading.HEADING2);
+      body.appendParagraph(`Study Summary: ${file.getName()} (${lastUpdated.toLocaleDateString()})`)
+          .setHeading(DocumentApp.ParagraphHeading.HEADING3);
+      
+      if (rawText.trim().length > 0) {
+        const aiSummary = generateAISummary(rawText);
+        // Direct insertion without LaTeX image processing
+        body.appendParagraph(aiSummary);
+      } else {
+        body.appendParagraph(`New non-text file added: ${file.getUrl()}`);
+      }
+    }
+  }
+  
+  if (newFilesFound) {
+    doc.saveAndClose();
+  }
+}
+
+/**
+ * Sends text to Google's Gemini API with automatic retries on temporary 503 errors
+ */
+function generateAISummary(rawText) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${GEMINI_API_KEY}`;
+  
+  const prompt = 
+  `You are an expert tutor creating a comprehensive study guide entry from     class materials. Make your notes neat.
+
+  Whenever generating notes, make sure to not generate two different sets of notes from the same pdf
+
+  CRITICAL FORMATTING INSTRUCTION: 
+  Do NOT use LaTeX commands, dollar signs, or backslashes for math formatting (such as \\vec{}, \\mathbb{}, \\frac{}, or $...$). 
+  Always write mathematical expressions, vectors, equations, and symbols in plain Unicode text so they display cleanly in Google Docs. This is very important, especially when dealing with the dollar sign symbol ($). This also applies for any use of formatting tools like \begin, \end, \text, \cdot, as well as any other formatting tool that requires a command to be generated before the text.
+  For example:
+  - Write "u⃗" or "vector u" instead of "\\vec{u}"
+  - Write "R²" instead of "\\mathbb{R}^2"
+  - Write "x² + y² = z²" instead of "$x^2 + y^2 = z^2$"
+  - Write "c(u⃗) + d(v⃗)" instead of "c\\vec{u} + d\\vec{v}"
+  - Write [1 2] instead of \begin{bmatrix} 1 \\ 2 \end{bmatrix}
+  - Write [1 / 2 / 5] instead of \begin{bmatrix} 1 & 2 & 5 \end{bmatrix}
+
+  These are just examples, but use these guidlines all throughout the study guide.
+
+  Also, never use emojis unless absolutely necessary.
+
+  Please analyze the following raw text and organize it into this clear structure:
+  1. Key Concepts & Summary (2-3 concise paragraphs)
+  2. Important Terms & Definitions (bulleted list)
+  3. Core Takeaways & Formulae/Rules (if applicable)
+  4. 3 Self-Test Review Questions (with answers below them)
+
+Raw Text:
+${rawText}`;
+
+  const payload = {
+    "contents": [{
+      "parts": [{
+        "text": prompt
+      }]
+    }]
+  };
+  
+  const options = {
+    "method": "post",
+    "contentType": "application/json",
+    "payload": JSON.stringify(payload),
+    "muteHttpExceptions": true
+  };
+  
+  const maxRetries = 3;
+  let delay = 4000; // Start with a 4-second delay
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = UrlFetchApp.fetch(url, options);
+      const statusCode = response.getResponseCode();
+      const json = JSON.parse(response.getContentText());
+      
+      // If success (200 OK), return generated content
+      if (statusCode === 200 && json.candidates && json.candidates[0].content.parts[0].text) {
+        return json.candidates[0].content.parts[0].text;
+      }
+      
+      // If 503 (Server Busy) or 429 (Rate Limit), pause and retry
+      if ((statusCode === 503 || statusCode === 429) && attempt < maxRetries) {
+        Logger.log(`Server busy (${statusCode}). Retrying in ${delay / 1000} seconds... (Attempt ${attempt}/${maxRetries})`);
+        Utilities.sleep(delay);
+        delay *= 2; // Double delay time for next retry (4s -> 8s -> 16s)
+        continue;
+      }
+      
+      // If non-retryable error occurs or retries exhausted, return error details
+      return `[AI Generation Failed (Status ${statusCode})]: ${JSON.stringify(json)}`;
+      
+    } catch (e) {
+      if (attempt < maxRetries) {
+        Utilities.sleep(delay);
+        delay *= 2;
+      } else {
+        return `[API Error]: ${e.message}`;
+      }
+    }
+  }
+}
+
+/**
+ * Drive API v3 PDF OCR Helper
+ */
+function extractTextFromPDF(file) {
+  try {
+    const resource = {
+      name: "Temp_OCR_" + file.getName(),
+      mimeType: MimeType.GOOGLE_DOCS
+    };
+    const tempDocFile = Drive.Files.create(resource, file.getBlob());
+    const tempDoc = DocumentApp.openById(tempDocFile.id);
+    const extractedText = tempDoc.getBody().getText();
+    DriveApp.getFileById(tempDocFile.id).setTrashed(true);
+    
+    return extractedText.trim();
+  } catch (e) {
+    return `[PDF OCR Error: ${e.message}]`;
+  }
+}
